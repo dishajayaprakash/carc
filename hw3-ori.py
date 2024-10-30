@@ -1,4 +1,4 @@
-mport pandas as pd
+import pandas as pd
 import nltk
 from nltk.tokenize import RegexpTokenizer
 import numpy as np
