@@ -300,12 +300,12 @@ if __name__ == "__main__":
         validation_filename=validation_csv_path,
         start_index=0,
         end_index=180000,  # Adjust as needed
-        num_epochs=10,
+        num_epochs=40,
         batch_size=64,
-        learning_rate=0.001,
+        learning_rate=0.005,
         emb_dim=256,
         hid_dim=512,
-        n_layers=2,
+        n_layers=3,
         dropout=0.5,
         max_length=100
     )
