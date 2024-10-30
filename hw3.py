@@ -292,8 +292,8 @@ def main(train_filename, validation_filename, start_index=None, end_index=None, 
     print("Validation results saved to 'validation_results.csv'.")
 
 if __name__ == "__main__":
-    train_csv_path = 'D:\\hw2-autocorrect\\assignment_data\\train_fold.csv'
-    validation_csv_path = 'D:\\hw2-autocorrect\\assignment_data\\val_fold.csv'
+    train_csv_path = 'home1\\thotappa\\hw2-autocorrect\\assignment_data\\train_fold.csv'
+    validation_csv_path = 'home1\\thotappa\\hw2-autocorrect\\assignment_data\\val_fold.csv'
 
     main(
         train_filename=train_csv_path,
