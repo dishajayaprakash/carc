@@ -7,7 +7,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-import itertools
+import os
+os.chdir("D:/hw2-autocorrect/assignment_data")
 
 def load_data(filename, start_index=None, end_index=None):
     print(f"Loading data from {filename}...")
@@ -63,66 +64,177 @@ def build_char_vocab(texts):
 class Encoder(nn.Module):
     def __init__(self, input_dim, emb_dim, hid_dim, n_layers, dropout):
         super(Encoder, self).__init__()
+
+        self.hid_dim = hid_dim
+        self.n_layers = n_layers
+
         self.embedding = nn.Embedding(input_dim, emb_dim, padding_idx=0)
-        self.rnn = nn.GRU(emb_dim, hid_dim, n_layers, dropout=dropout, bidirectional=False)
+
+        # Bidirectional GRU
+        self.rnn = nn.GRU(emb_dim, hid_dim, n_layers, dropout=dropout, bidirectional=True)
+
+        self.fc = nn.Linear(hid_dim * 2, hid_dim)
+
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, src):
+
         # src: [seq_len, batch_size]
-        embedded = self.dropout(self.embedding(src))  # [seq_len, batch_size, emb_dim]
-        outputs, hidden = self.rnn(embedded)          # outputs: [seq_len, batch_size, hid_dim]
-        return hidden
+        embedded = self.dropout(self.embedding(src))
+
+        # embedded: [seq_len, batch_size, emb_dim]
+        outputs, hidden = self.rnn(embedded)
+
+        # outputs: [seq_len, batch_size, hid_dim * 2]
+        # hidden: [n_layers * 2, batch_size, hid_dim]
+
+        # Separate the hidden states for forward and backward passes
+        # hidden_forward and hidden_backward: [n_layers, batch_size, hid_dim]
+        hidden_forward = hidden[0:self.n_layers]
+        hidden_backward = hidden[self.n_layers:self.n_layers*2]
+
+        # Concatenate forward and backward hidden states for each layer
+        hidden = torch.cat((hidden_forward, hidden_backward), dim=2)
+
+        # hidden: [n_layers, batch_size, hid_dim * 2]
+
+        # Pass through a linear layer and apply tanh activation
+        hidden = torch.tanh(self.fc(hidden))
+
+        # hidden: [n_layers, batch_size, hid_dim]
+        return outputs, hidden
+
+class Attention(nn.Module):
+    def __init__(self, hid_dim):
+        super(Attention, self).__init__()
+
+        self.attn = nn.Linear((hid_dim * 2) + hid_dim, hid_dim)
+        self.v = nn.Linear(hid_dim, 1, bias=False)
+
+    def forward(self, hidden, encoder_outputs):
+
+        # hidden: [batch_size, hid_dim]
+        # encoder_outputs: [src_len, batch_size, hid_dim * 2]
+        src_len = encoder_outputs.shape[0]
+
+        # Repeat hidden state src_len times
+        hidden = hidden.repeat(src_len, 1, 1)
+
+        # hidden: [src_len, batch_size, hid_dim]
+        encoder_outputs = encoder_outputs.permute(0, 1, 2)
+
+        # Calculate energy
+        energy = torch.tanh(self.attn(torch.cat((hidden, encoder_outputs), dim=2)))
+
+        # energy: [src_len, batch_size, hid_dim]
+        attention = self.v(energy).squeeze(2)
+
+        # attention: [src_len, batch_size]
+        return nn.functional.softmax(attention.permute(1, 0), dim=1)
 
 class Decoder(nn.Module):
-    def __init__(self, output_dim, emb_dim, hid_dim, n_layers, dropout):
+    def __init__(self, output_dim, emb_dim, hid_dim, n_layers, dropout, attention):
         super(Decoder, self).__init__()
+
+        self.output_dim = output_dim
+        self.attention = attention
+
         self.embedding = nn.Embedding(output_dim, emb_dim, padding_idx=0)
-        self.rnn = nn.GRU(emb_dim, hid_dim, n_layers, dropout=dropout)
-        self.fc_out = nn.Linear(hid_dim, output_dim)
+
+        self.rnn = nn.GRU((hid_dim * 2) + emb_dim, hid_dim, n_layers, dropout=dropout)
+
+        self.fc_out = nn.Linear((hid_dim * 2) + hid_dim + emb_dim, output_dim)
+
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, input, hidden):
+    def forward(self, input, hidden, encoder_outputs):
+
         # input: [batch_size]
-        input = input.unsqueeze(0)  # [1, batch_size]
-        embedded = self.dropout(self.embedding(input))  # [1, batch_size, emb_dim]
-        output, hidden = self.rnn(embedded, hidden)
-        prediction = self.fc_out(output.squeeze(0))  # [batch_size, output_dim]
+        # hidden: [n_layers, batch_size, hid_dim]
+        # encoder_outputs: [src_len, batch_size, hid_dim * 2]
+
+        input = input.unsqueeze(0)
+
+        embedded = self.dropout(self.embedding(input))
+
+        # embedded: [1, batch_size, emb_dim]
+
+        a = self.attention(hidden[-1], encoder_outputs)
+
+        # a: [batch_size, src_len]
+        a = a.unsqueeze(1)
+
+        encoder_outputs = encoder_outputs.permute(1, 0, 2)
+
+        # Weighted sum of encoder_outputs
+        weighted = torch.bmm(a, encoder_outputs)
+
+        # weighted: [batch_size, 1, hid_dim * 2]
+        weighted = weighted.permute(1, 0, 2)
+
+        # weighted: [1, batch_size, hid_dim * 2]
+        rnn_input = torch.cat((embedded, weighted), dim=2)
+
+        output, hidden = self.rnn(rnn_input, hidden)
+
+        # output: [1, batch_size, hid_dim]
+        # hidden: [n_layers, batch_size, hid_dim]
+
+        embedded = embedded.squeeze(0)
+        output = output.squeeze(0)
+        weighted = weighted.squeeze(0)
+
+        prediction = self.fc_out(torch.cat((output, weighted, embedded), dim=1))
+
+        # prediction: [batch_size, output_dim]
         return prediction, hidden
 
 class Seq2Seq(nn.Module):
     def __init__(self, encoder, decoder, device, teacher_forcing_ratio=0.5):
-        super(Seq2Seq, self).__init__()
+        super().__init__()
+
         self.encoder = encoder
         self.decoder = decoder
         self.device = device
         self.teacher_forcing_ratio = teacher_forcing_ratio
 
     def forward(self, src, trg):
-        batch_size = src.shape[1]
-        max_len = trg.shape[0]
-        trg_vocab_size = self.decoder.embedding.num_embeddings
 
-        outputs = torch.zeros(max_len, batch_size, trg_vocab_size).to(self.device)
-        hidden = self.encoder(src)
+        # src: [src_len, batch_size]
+        # trg: [trg_len, batch_size]
+        batch_size = trg.shape[1]
+        trg_len = trg.shape[0]
+        trg_vocab_size = self.decoder.output_dim
 
-        input = trg[0, :]  # Start with <sos>
-        for t in range(1, max_len):
-            output, hidden = self.decoder(input, hidden)
+        # tensor to store decoder outputs
+        outputs = torch.zeros(trg_len, batch_size, trg_vocab_size).to(self.device)
+
+        encoder_outputs, hidden = self.encoder(src)
+
+        input = trg[0, :]
+
+        for t in range(1, trg_len):
+
+            output, hidden = self.decoder(input, hidden, encoder_outputs)
+
             outputs[t] = output
-            top1 = output.argmax(1)
+
             teacher_force = np.random.rand() < self.teacher_forcing_ratio
+
+            top1 = output.argmax(1)
+
             input = trg[t] if teacher_force else top1
+
         return outputs
 
 def train(model, iterator, optimizer, criterion, clip):
     model.train()
     epoch_loss = 0
     for src, trg in tqdm(iterator, desc="Training", leave=False):
-        src = src.transpose(0, 1).to(model.device)  # [seq_len, batch_size]
+        src = src.transpose(0, 1).to(model.device)
         trg = trg.transpose(0, 1).to(model.device)
         optimizer.zero_grad()
         output = model(src, trg)
-        # Exclude the first token (<sos>) from loss calculation
         output_dim = output.shape[-1]
         output = output[1:].view(-1, output_dim)
         trg = trg[1:].reshape(-1)
@@ -134,10 +246,9 @@ def train(model, iterator, optimizer, criterion, clip):
     avg_loss = epoch_loss / len(iterator)
     return avg_loss
 
-def evaluate(model, iterator, criterion, vocab):
+def evaluate(model, iterator, criterion):
     model.eval()
     epoch_loss = 0
-    inv_vocab = {idx: ch for ch, idx in vocab.items()}
 
     with torch.no_grad():
         for src, trg in tqdm(iterator, desc="Evaluating", leave=False):
@@ -145,60 +256,12 @@ def evaluate(model, iterator, criterion, vocab):
             trg = trg.transpose(0, 1).to(model.device)
             output = model(src, trg)
             output_dim = output.shape[-1]
-            output_loss = output[1:].view(-1, output_dim)
-            trg_loss = trg[1:].reshape(-1)
-            loss = criterion(output_loss, trg_loss)
+            output = output[1:].view(-1, output_dim)
+            trg = trg[1:].reshape(-1)
+            loss = criterion(output, trg)
             epoch_loss += loss.item()
     avg_loss = epoch_loss / len(iterator)
     return avg_loss
-
-def grid_search(train_dataset, val_dataset, vocab, device, hyperparameter_grid):
-    print("Starting grid search over hyperparameters...")
-    results = []
-    for params in hyperparameter_grid:
-        emb_dim = params['emb_dim']
-        hid_dim = params['hid_dim']
-        n_layers = params['n_layers']
-        dropout = params['dropout']
-        learning_rate = params['learning_rate']
-        batch_size = params['batch_size']
-        teacher_forcing_ratio = params['teacher_forcing_ratio']
-
-        print(f"\nTesting hyperparameters: {params}")
-
-        # Create data loaders
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-
-        # Initialize model
-        input_dim = len(vocab)
-        output_dim = len(vocab)
-        encoder = Encoder(input_dim, emb_dim, hid_dim, n_layers, dropout)
-        decoder = Decoder(output_dim, emb_dim, hid_dim, n_layers, dropout)
-        model = Seq2Seq(encoder, decoder, device, teacher_forcing_ratio).to(device)
-
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        criterion = nn.CrossEntropyLoss(ignore_index=vocab['<pad>'])  # Ignore <pad> token
-
-        # Train for one epoch
-        train_loss = train(model, train_loader, optimizer, criterion, clip=1)
-        val_loss = evaluate(model, val_loader, criterion, vocab)
-
-        print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-
-        # Save results
-        results.append({
-            'params': params,
-            'train_loss': train_loss,
-            'val_loss': val_loss
-        })
-
-    # Find the best hyperparameters based on validation loss
-    best_result = min(results, key=lambda x: x['val_loss'])
-    print(f"\nBest hyperparameters based on validation loss:")
-    print(best_result['params'])
-    print(f"Train Loss: {best_result['train_loss']:.4f}, Val Loss: {best_result['val_loss']:.4f}")
-    return best_result['params']
 
 def main(train_filename, validation_filename, start_index=None, end_index=None, max_length=100):
     print("Initializing training process...")
@@ -223,82 +286,55 @@ def main(train_filename, validation_filename, start_index=None, end_index=None, 
     train_dataset = AutocorrectDataset(train_input_texts, train_target_texts, vocab, max_length)
     val_dataset = AutocorrectDataset(val_input_texts, val_target_texts, vocab, max_length)
 
-    # Define hyperparameter grid
-    emb_dim_list = [128, 256]
-    hid_dim_list = [256, 512]
-    n_layers_list = [1, 2]
-    dropout_list = [0.3, 0.5]
-    learning_rate_list = [0.001, 0.0005]
-    batch_size_list = [64, 128]
-    teacher_forcing_ratio_list = [0.5, 0.7]
-
-    hyperparameter_grid = [
-        {
-            'emb_dim': emb_dim,
-            'hid_dim': hid_dim,
-            'n_layers': n_layers,
-            'dropout': dropout,
-            'learning_rate': learning_rate,
-            'batch_size': batch_size,
-            'teacher_forcing_ratio': teacher_forcing_ratio
-        }
-        for emb_dim in emb_dim_list
-        for hid_dim in hid_dim_list
-        for n_layers in n_layers_list
-        for dropout in dropout_list
-        for learning_rate in learning_rate_list
-        for batch_size in batch_size_list
-        for teacher_forcing_ratio in teacher_forcing_ratio_list
-    ]
-
-    # Limit the number of combinations for practicality
-    max_combinations = 10
-    hyperparameter_grid = hyperparameter_grid[:max_combinations]
-
-    # Perform grid search
-    best_params = grid_search(train_dataset, val_dataset, vocab, device, hyperparameter_grid)
-
-    # Train final model with best hyperparameters
-    print("\nTraining final model with best hyperparameters...")
-    emb_dim = best_params['emb_dim']
-    hid_dim = best_params['hid_dim']
-    n_layers = best_params['n_layers']
-    dropout = best_params['dropout']
-    learning_rate = best_params['learning_rate']
-    batch_size = best_params['batch_size']
-    teacher_forcing_ratio = best_params['teacher_forcing_ratio']
-    num_epochs = 10  # Adjust as needed
-
-    # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    # Hyperparameters
+    INPUT_DIM = len(vocab)
+    OUTPUT_DIM = len(vocab)
+    ENC_EMB_DIM = 256
+    DEC_EMB_DIM = 256
+    HID_DIM = 512
+    N_LAYERS = 2
+    ENC_DROPOUT = 0.5
+    DEC_DROPOUT = 0.5
+    LEARNING_RATE = 0.0005
+    BATCH_SIZE = 16
+    TEACHER_FORCING_RATIO = 0.5
+    N_EPOCHS = 20
+    CLIP = 1
 
     # Initialize model
-    input_dim = len(vocab)
-    output_dim = len(vocab)
-    encoder = Encoder(input_dim, emb_dim, hid_dim, n_layers, dropout)
-    decoder = Decoder(output_dim, emb_dim, hid_dim, n_layers, dropout)
-    model = Seq2Seq(encoder, decoder, device, teacher_forcing_ratio).to(device)
+    attention = Attention(HID_DIM)
+    encoder = Encoder(INPUT_DIM, ENC_EMB_DIM, HID_DIM, N_LAYERS, ENC_DROPOUT)
+    decoder = Decoder(OUTPUT_DIM, DEC_EMB_DIM, HID_DIM, N_LAYERS, DEC_DROPOUT, attention)
+    model = Seq2Seq(encoder, decoder, device, TEACHER_FORCING_RATIO).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.CrossEntropyLoss(ignore_index=vocab['<pad>'])  # Ignore <pad> token
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    criterion = nn.CrossEntropyLoss(ignore_index=vocab['<pad>'])
 
-    best_val_wer = float('inf')
-    for epoch in range(num_epochs):
-        print(f"\n=== Epoch {epoch+1}/{num_epochs} ===")
-        train_loss = train(model, train_loader, optimizer, criterion, clip=1)
-        val_loss = evaluate(model, val_loader, criterion, vocab)
+    # Create data loaders
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
+    best_val_loss = float('inf')
+    for epoch in range(N_EPOCHS):
+        print(f"\n=== Epoch {epoch+1}/{N_EPOCHS} ===")
+        train_loss = train(model, train_loader, optimizer, criterion, CLIP)
+        val_loss = evaluate(model, val_loader, criterion)
         print(f"Epoch {epoch+1} Summary: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
-    # Save the final model and vocabulary
+        # Save the model if validation loss decreases
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), 'seq2seq_model.pth')
+
     print("Training completed. Saving final model and vocabulary...")
-    torch.save(model.state_dict(), 'seq2seq_model.pth')
     with open('vocab.pkl', 'wb') as f:
         pickle.dump(vocab, f)
     print("Model and vocabulary saved.")
 
     # Evaluation on the validation set
     print("\n=== Final Evaluation on Validation Set ===")
+    model.load_state_dict(torch.load('seq2seq_model.pth'))
+    model.eval()
     wers = []
     corrected_texts = []
     inv_vocab = {idx: ch for ch, idx in vocab.items()}
@@ -330,13 +366,13 @@ def translate_sentence(model, sentence, vocab, device, max_length=100):
     tokens = [vocab.get(ch, vocab['<unk>']) for ch in list(sentence.lower())]
     src = torch.tensor([vocab['<sos>']] + tokens + [vocab['<eos>']]).unsqueeze(1).to(device)
     with torch.no_grad():
-        hidden = model.encoder(src)
+        encoder_outputs, hidden = model.encoder(src)
     input_token = torch.tensor([vocab['<sos>']]).to(device)
     outputs = []
     inv_vocab = {idx: ch for ch, idx in vocab.items()}
     for _ in range(max_length):
         with torch.no_grad():
-            output, hidden = model.decoder(input_token, hidden)
+            output, hidden = model.decoder(input_token, hidden, encoder_outputs)
             top1 = output.argmax(1)
         if top1.item() == vocab['<eos>']:
             break
@@ -355,6 +391,6 @@ if __name__ == "__main__":
         train_filename=train_csv_path,
         validation_filename=validation_csv_path,
         start_index=0,
-        end_index=180000,  # Adjust as needed
+        end_index=100,  # Adjust as needed
         max_length=100
     )
