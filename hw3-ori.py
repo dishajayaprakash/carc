@@ -1,3 +1,4 @@
+import argparse
 import pandas as pd
 import nltk
 from nltk.tokenize import RegexpTokenizer
@@ -204,14 +205,14 @@ def translate_sentence(model, sentence, input_vocab, target_vocab, max_length=10
     translated_sentence = ''.join([inv_target_vocab.get(idx, '') for idx in outputs])
     return translated_sentence
 
-def main(train_filename, validation_filename, start_index=None, end_index=None, num_epochs=10, batch_size=64, learning_rate=0.001, emb_dim=256, hid_dim=512, n_layers=2, dropout=0.5, max_length=100):
+def main(args):
     print("Initializing training process...")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
     # Load and preprocess data
-    train_data = load_data(train_filename, start_index, end_index)
-    val_data = load_data(validation_filename)
+    train_data = load_data(args.train_filename, args.start_index, args.end_index)
+    val_data = load_data(args.validation_filename)
     train_input_texts = train_data['corrupt_msg'].tolist()
     train_target_texts = train_data['gold_msg'].tolist()
     val_input_texts = val_data['corrupt_msg'].tolist()
@@ -224,27 +225,27 @@ def main(train_filename, validation_filename, start_index=None, end_index=None, 
 
     print("Creating datasets and dataloaders...")
     # Create datasets and dataloaders
-    train_dataset = AutocorrectDataset(train_input_texts, train_target_texts, input_vocab, target_vocab, max_length)
-    val_dataset = AutocorrectDataset(val_input_texts, val_target_texts, input_vocab, target_vocab, max_length)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_dataset = AutocorrectDataset(train_input_texts, train_target_texts, input_vocab, target_vocab, args.max_length)
+    val_dataset = AutocorrectDataset(val_input_texts, val_target_texts, input_vocab, target_vocab, args.max_length)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
     # Initialize model
     input_dim = len(input_vocab)
     output_dim = len(target_vocab)
     print(f"Input dimension: {input_dim}, Output dimension: {output_dim}")
-    encoder = Encoder(input_dim, emb_dim, hid_dim, n_layers, dropout)
-    decoder = Decoder(output_dim, emb_dim, hid_dim, n_layers, dropout)
+    encoder = Encoder(input_dim, args.emb_dim, args.hid_dim, args.n_layers, args.dropout)
+    decoder = Decoder(output_dim, args.emb_dim, args.hid_dim, args.n_layers, args.dropout)
     model = Seq2Seq(encoder, decoder, device).to(device)
     print("Model initialized.")
 
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
     criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignore <pad> token
 
     # Training loop
     best_val_wer = float('inf')
-    for epoch in range(num_epochs):
-        print(f"\n=== Epoch {epoch+1}/{num_epochs} ===")
+    for epoch in range(args.num_epochs):
+        print(f"\n=== Epoch {epoch+1}/{args.num_epochs} ===")
         train_loss = train(model, train_loader, optimizer, criterion, clip=1, epoch=epoch)
         val_loss, val_wer = evaluate(model, val_loader, criterion, target_vocab, epoch=epoch)
         print(f"Epoch {epoch+1} Summary: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val WER: {val_wer:.4f}")
@@ -269,7 +270,7 @@ def main(train_filename, validation_filename, start_index=None, end_index=None, 
     wers = []
     corrected_texts = []
     for idx, (input_text, target_text) in enumerate(tqdm(zip(val_input_texts, val_target_texts), total=len(val_input_texts))):
-        prediction = translate_sentence(model, input_text, input_vocab, target_vocab, max_length)
+        prediction = translate_sentence(model, input_text, input_vocab, target_vocab, args.max_length)
         corrected_texts.append(prediction)
         wer_score = wer(target_text, prediction)
         wers.append(wer_score)
@@ -291,21 +292,22 @@ def main(train_filename, validation_filename, start_index=None, end_index=None, 
     val_results.to_csv('validation_results.csv', index=False)
     print("Validation results saved to 'validation_results.csv'.")
 
-if __name__ == "__main__":
-    train_csv_path = 'train_fold.csv'
-    validation_csv_path = 'val_fold.csv'
 
-    main(
-        train_filename=train_csv_path,
-        validation_filename=validation_csv_path,
-        start_index=0,
-        end_index=180000,  # Adjust as needed
-        num_epochs=40,
-        batch_size=64,
-        learning_rate=0.005,
-        emb_dim=256,
-        hid_dim=512,
-        n_layers=3,
-        dropout=0.5,
-        max_length=100
-    )
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Sequence-to-Sequence Autocorrect Training Script")
+    parser.add_argument('--train_filename', type=str, required=True, help='Path to training data CSV file')
+    parser.add_argument('--validation_filename', type=str, required=True, help='Path to validation data CSV file')
+    parser.add_argument('--start_index', type=int, default=None, help='Start index for training data slicing')
+    parser.add_argument('--end_index', type=int, default=None, help='End index for training data slicing')
+    parser.add_argument('--num_epochs', type=int, default=10, help='Number of epochs for training')
+    parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training')
+    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for optimizer')
+    parser.add_argument('--emb_dim', type=int, default=256, help='Embedding dimension size')
+    parser.add_argument('--hid_dim', type=int, default=512, help='Hidden dimension size for RNN')
+    parser.add_argument('--n_layers', type=int, default=2, help='Number of layers in the RNN')
+    parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
+    parser.add_argument('--max_length', type=int, default=100, help='Maximum sequence length for padding')
+
+    args = parser.parse_args()
+
+    main(args)
