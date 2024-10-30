@@ -7,8 +7,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-import os
-os.chdir("D:/hw2-autocorrect/assignment_data")
 
 def load_data(filename, start_index=None, end_index=None):
     print(f"Loading data from {filename}...")
