@@ -302,11 +302,11 @@ if __name__ == "__main__":
         end_index=180000,  # Adjust as needed
         num_epochs=10,
         batch_size=64,
-        learning_rate=0.001,
-        emb_dim=256,
+        learning_rate=0.01,
+        emb_dim=128,
         hid_dim=512,
-        n_layers=2,
-        dropout=0.5,
-        max_length=100
+        n_layers=3,
+        dropout=0.6,
+        max_length=200
     )
 
