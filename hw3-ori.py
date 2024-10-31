@@ -124,6 +124,23 @@ class Seq2Seq(nn.Module):
             input = trg[t] if np.random.rand() < teacher_forcing_ratio else top1
         return outputs
 
+def train_seq2seq(model, iterator, optimizer, criterion, clip, epoch, teacher_forcing_ratio):
+    model.train()
+    epoch_loss = 0
+    for src, trg in iterator:
+        src, trg = src.transpose(0, 1).to(model.device), trg.transpose(0, 1).to(model.device)
+        optimizer.zero_grad()
+        output = model(src, trg, teacher_forcing_ratio)
+        output_dim = output.shape[-1]
+        output = output[1:].view(-1, output_dim)
+        trg = trg[1:].reshape(-1)
+        loss = criterion(output, trg)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+        optimizer.step()
+        epoch_loss += loss.item()
+    return epoch_loss / len(iterator)
+
 def train_encoder(encoder, train_loader, optimizer, criterion):
     encoder.train()
     epoch_loss = 0
@@ -188,7 +205,7 @@ def main(args):
         optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
         criterion = nn.CrossEntropyLoss(ignore_index=0)
         for epoch in range(args.num_epochs):
-            train_loss = train(model, train_loader, optimizer, criterion, clip=1, epoch=epoch, teacher_forcing_ratio=args.teacher_forcing_ratio)
+            train_loss = train_seq2seq(model, train_loader, optimizer, criterion, clip=1, epoch=epoch, teacher_forcing_ratio=args.teacher_forcing_ratio)
             print(f"Epoch {epoch+1}/{args.num_epochs}, Seq2Seq Train Loss: {train_loss:.4f}")
 
 if __name__ == "__main__":
