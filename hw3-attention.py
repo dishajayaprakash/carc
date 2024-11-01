@@ -151,7 +151,7 @@ class Seq2Seq(nn.Module):
             input = trg[t] if np.random.rand() < teacher_forcing_ratio else top1
         return outputs
 
-def train(model, iterator, optimizer, criterion, clip, epoch):
+def train(model, iterator, optimizer, criterion, clip, epoch, args):
     model.train()
     epoch_loss = 0
     print(f"Starting training for epoch {epoch+1}...")
@@ -159,14 +159,15 @@ def train(model, iterator, optimizer, criterion, clip, epoch):
         src = src.transpose(0, 1).to(model.device)  # [seq_len, batch_size]
         trg = trg.transpose(0, 1).to(model.device)
         optimizer.zero_grad()
-        output = model(src, trg)
+        output = model(src, trg, teacher_forcing_ratio=args.teacher_forcing_ratio)
         # Exclude the first token (<sos>) from loss calculation
         output_dim = output.shape[-1]
         output = output[1:].view(-1, output_dim)
         trg = trg[1:].reshape(-1)
         loss = criterion(output, trg)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+        if args.use_gradient_clipping:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
         optimizer.step()
         epoch_loss += loss.item()
 
@@ -274,22 +275,36 @@ def main(args):
     attention = Attention(args.hid_dim) if args.use_attention else None
 
     # Create encoder and decoder with attention if enabled
-    encoder = Encoder(input_dim, args.emb_dim, args.hid_dim, args.n_layers, args.dropout)
-    decoder = Decoder(output_dim, args.emb_dim, args.hid_dim, args.n_layers, args.dropout, attention=attention)
+    encoder = Encoder(input_dim, args.emb_dim, args.hid_dim, args.n_layers, args.dropout_rate)
+    decoder = Decoder(output_dim, args.emb_dim, args.hid_dim, args.n_layers, args.dropout_rate, attention=attention)
 
     # Create the Seq2Seq model with attention if enabled
     model = Seq2Seq(encoder, decoder, device, attention).to(device)
 
     print("Model initialized.")
 
-    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
-    criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignore <pad> token
+    # Adjust optimizer with or without weight decay
+    if args.use_weight_decay:
+        optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+        print(f"Using weight decay with coefficient: {args.weight_decay}")
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+        print("Weight decay not used.")
 
-    # Training loop
+    # Using label smoothing in the loss function
+    if args.use_label_smoothing:
+        criterion = nn.CrossEntropyLoss(ignore_index=0, label_smoothing=args.label_smoothing_value)
+        print(f"Using label smoothing with value: {args.label_smoothing_value}")
+    else:
+        criterion = nn.CrossEntropyLoss(ignore_index=0)
+        print("Label smoothing not used.")
+
+    # Training loop with optional early stopping
     best_val_wer = float('inf')
+    patience_counter = 0
     for epoch in range(args.num_epochs):
         print(f"\n=== Epoch {epoch+1}/{args.num_epochs} ===")
-        train_loss = train(model, train_loader, optimizer, criterion, clip=1, epoch=epoch)
+        train_loss = train(model, train_loader, optimizer, criterion, clip=args.clip_value, epoch=epoch, args=args)
         val_loss, val_wer = evaluate(model, val_loader, criterion, target_vocab, epoch=epoch)
         print(f"Epoch {epoch+1} Summary: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val WER: {val_wer:.4f}")
 
@@ -298,6 +313,13 @@ def main(args):
             best_val_wer = val_wer
             torch.save(model.state_dict(), 'best_seq2seq_model.pth')
             print(f"Best model saved with Val WER: {best_val_wer:.4f}")
+            patience_counter = 0  # Reset counter if performance improves
+        else:
+            patience_counter += 1
+            print(f"No improvement in Val WER. Patience counter: {patience_counter}/{args.patience}")
+            if args.use_early_stopping and patience_counter >= args.patience:
+                print("Early stopping triggered.")
+                break  # Early stopping
 
     # Save the final model and vocabularies
     print("Training completed. Saving final model and vocabularies...")
@@ -336,20 +358,29 @@ def main(args):
     print("Validation results saved to 'validation_results.csv'.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Sequence-to-Sequence Autocorrect Training Script with Attention Option")
+    parser = argparse.ArgumentParser(description="Sequence-to-Sequence Autocorrect Training Script with Configurable Options")
     parser.add_argument('--train_filename', type=str, required=True, help='Path to training data CSV file')
     parser.add_argument('--validation_filename', type=str, required=True, help='Path to validation data CSV file')
     parser.add_argument('--start_index', type=int, default=None, help='Start index for training data slicing')
     parser.add_argument('--end_index', type=int, default=None, help='End index for training data slicing')
-    parser.add_argument('--num_epochs', type=int, default=10, help='Number of epochs for training')
+    parser.add_argument('--num_epochs', type=int, default=20, help='Number of epochs for training')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training')
-    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for optimizer')
+    parser.add_argument('--learning_rate', type=float, default=0.0005, help='Learning rate for optimizer')
     parser.add_argument('--emb_dim', type=int, default=256, help='Embedding dimension size')
-    parser.add_argument('--hid_dim', type=int, default=512, help='Hidden dimension size for RNN')
-    parser.add_argument('--n_layers', type=int, default=2, help='Number of layers in the RNN')
-    parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
+    parser.add_argument('--hid_dim', type=int, default=256, help='Hidden dimension size for RNN')
+    parser.add_argument('--n_layers', type=int, default=1, help='Number of layers in the RNN')
+    parser.add_argument('--dropout_rate', type=float, default=0.7, help='Dropout rate')
     parser.add_argument('--max_length', type=int, default=100, help='Maximum sequence length for padding')
     parser.add_argument('--use_attention', action='store_true', help='Include attention mechanism in the model')
+    parser.add_argument('--use_weight_decay', action='store_true', help='Use weight decay (L2 regularization)')
+    parser.add_argument('--weight_decay', type=float, default=1e-5, help='Weight decay coefficient')
+    parser.add_argument('--use_label_smoothing', action='store_true', help='Use label smoothing in the loss function')
+    parser.add_argument('--label_smoothing_value', type=float, default=0.1, help='Label smoothing value')
+    parser.add_argument('--use_early_stopping', action='store_true', help='Use early stopping during training')
+    parser.add_argument('--patience', type=int, default=3, help='Patience for early stopping')
+    parser.add_argument('--use_gradient_clipping', action='store_true', help='Use gradient clipping during training')
+    parser.add_argument('--clip_value', type=float, default=1.0, help='Maximum norm for gradient clipping')
+    parser.add_argument('--teacher_forcing_ratio', type=float, default=0.5, help='Teacher forcing ratio during training')
 
     args = parser.parse_args()
 
