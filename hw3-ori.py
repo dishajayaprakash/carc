@@ -396,8 +396,8 @@ def main(args):
 # Entry Point
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Transformer-Based Sequence-to-Sequence Autocorrect Training Script with Configurable Options")
-    parser.add_argument('--train_filename', type=str, required=True, help='Path to training data CSV file')
-    parser.add_argument('--validation_filename', type=str, required=True, help='Path to validation data CSV file')
+    parser.add_argument('--train_filename', type=str, default='train_fold.csv', help='Path to training data CSV file')
+    parser.add_argument('--validation_filename', type=str, default='val_fold.csv', help='Path to validation data CSV file')
     parser.add_argument('--start_index', type=int, default=None, help='Start index for training data slicing')
     parser.add_argument('--end_index', type=int, default=None, help='End index for training data slicing')
     parser.add_argument('--num_epochs', type=int, default=20, help='Number of epochs for training')
