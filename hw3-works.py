@@ -10,7 +10,6 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Embedding, LSTM, Dense, Bidirectional, TimeDistributed, Dropout
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, Callback
 import jiwer  # For WER calculation
-import matplotlib.pyplot as plt
 import os
 
 def load_data(filename, max_samples=None):
@@ -72,13 +71,17 @@ def main(args):
     print("Initializing training process...")
 
     # Check if GPU is available
-    device = tf.config.list_physical_devices('GPU')
-    if device:
-        device_name = '/GPU:0'
-        print("Using GPU")
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        print("GPU is available.")
+        # Optional: Set memory growth to prevent TensorFlow from allocating all GPU memory
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+        except Exception as e:
+            print(f"Error setting memory growth: {e}")
     else:
-        device_name = '/CPU:0'
-        print("Using CPU")
+        print("GPU is not available. Using CPU.")
 
     # Load and preprocess data
     print("Loading data...")
@@ -128,14 +131,14 @@ def main(args):
 
     # Build model
     print("Building model...")
-    with tf.device(device_name):
-        model = build_model(
-            vocab_size=vocab_size,
-            max_seq_length=max_seq_length,
-            embedding_dim=args.embedding_dim,
-            lstm_units=args.lstm_units,
-            dropout_rate=args.dropout_rate
-        )
+    model = build_model(
+        vocab_size=vocab_size,
+        max_seq_length=max_seq_length,
+        embedding_dim=args.embedding_dim,
+        lstm_units=args.lstm_units,
+        dropout_rate=args.dropout_rate
+    )
+
     # Compile the model with weighted_metrics to suppress the warning
     model.compile(
         optimizer='adam',
@@ -226,22 +229,22 @@ def main(args):
     for idx in range(len(val_input_texts)):
         input_seq = val_input_seqs[idx]
         input_length = np.count_nonzero(input_seq)
-        
+
         # Get the predicted indices for this sample
         predicted_seq = predicted_indices[idx][:input_length]
-        
+
         # Convert indices to characters
         predicted_text = ''.join([idx_to_char.get(idx, '') for idx in predicted_seq])
         predicted_text = predicted_text.strip()
         corrected_texts.append(predicted_text)
-        
+
         # Get the gold text
         gold_text = val_target_texts[idx]
-        
+
         # Compute WER
         wer_score = jiwer.wer(gold_text, predicted_text)
         wers.append(wer_score)
-        
+
         if (idx + 1) % 1000 == 0:
             print(f"Processed {idx+1}/{len(val_input_texts)} samples. Current WER: {wer_score:.4f}")
 
