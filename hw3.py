@@ -261,7 +261,7 @@ def main(args):
         # Save predictions to a CSV file
         df_output = pd.DataFrame({
             'corrupt_msg': input_texts,
-            'corrected_msg': corrected_texts
+            'pred_msg': corrected_texts
         })
         df_output.to_csv(args.output_csv, index=False)
         print(f"Predictions saved to {args.output_csv}.")
