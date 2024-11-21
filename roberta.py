@@ -229,7 +229,7 @@ def main():
     model = RobertaForSequenceClassification.from_pretrained(
         "roberta-base", num_labels=3
     )
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
     model.to(device)
 
     optimizer = AdamW(model.parameters(), lr=5e-5)
