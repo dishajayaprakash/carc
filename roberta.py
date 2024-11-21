@@ -50,6 +50,7 @@ def setup_kaggle_api():
             """
         )
     os.chmod(os.path.expanduser("~/.kaggle/kaggle.json"), 0o600)
+    os.system('kaggle datasets download -d ishaanthanekar/multilingual-reviews')
 
 
 def extract_dataset(dataset_path, extract_path):
