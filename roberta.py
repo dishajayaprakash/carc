@@ -178,12 +178,14 @@ def main():
     # Paths
     dataset_path = "multilingual-reviews.zip"
     extract_path = "dataset"
-
+    
+    setup_kaggle_api()
+    extract_dataset(dataset_path, extract_path)
 
     # Load datasets
-    train_df = pd.read_csv(f"train.csv")
-    validation_df = pd.read_csv(f"validation.csv")
-    test_df = pd.read_csv(f"test.csv")
+    train_df = pd.read_csv(f"{extract_path}/train.csv")
+    validation_df = pd.read_csv(f"{extract_path}/validation.csv")
+    test_df = pd.read_csv(f"{extract_path}/test.csv")
 
     # Filter languages
     selected_languages = ["en", "fr", "es"]
