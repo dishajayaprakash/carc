@@ -118,7 +118,7 @@ class SentimentDataset(Dataset):
 
 # Model training and evaluation functions
 def train_model(
-    model, train_loader, val_loader, optimizer, scheduler, device, num_epochs=4
+    model, train_loader, val_loader, optimizer, scheduler, device, num_epochs=2
 ):
     """Trains the Roberta model."""
     for epoch in range(num_epochs):
