@@ -20,6 +20,15 @@ from transformers import (
 from sklearn.metrics import classification_report
 from tqdm import tqdm
 
+# Limit the number of threads used by OpenBLAS and other libraries to prevent resource exhaustion
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OMP_NUM_THREADS'] = '1'
+
+# Set the number of threads used by PyTorch
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
+
 # Global configurations
 warnings.filterwarnings("ignore")
 nltk.download("stopwords")
