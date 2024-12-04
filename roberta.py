@@ -28,7 +28,7 @@ if __name__ == "__main__":
     parser.add_argument("--file_path", type=str, required=True, help="Path to the input CSV file.")
     parser.add_argument("--reviews_column", type=str, required=True, help="Column name for reviews.")
     parser.add_argument("--summary_columns", type=str, nargs='+', required=True, help="List of column names for summaries.")
-    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save the results CSV files.")
+    parser.add_argument("--output_file", type=str, required=True, help="Path to save the consolidated results CSV file.")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for processing.")
     parser.add_argument("--device", type=str, default="cuda", help="Device to use (e.g., 'cuda' or 'cpu').")
 
@@ -42,6 +42,9 @@ if __name__ == "__main__":
 
     # Initialize the scorer
     gender_scorer = GenderRepresentationBERTScore(device=args.device)
+
+    # Dictionary to store results for all columns
+    results = {"id": data["id"]}
 
     # Process each summary column
     for summary_column in args.summary_columns:
@@ -60,14 +63,13 @@ if __name__ == "__main__":
             overall_bert_scores.extend(batch_scores)
             print(f"Processed {end}/{len(reviews)} rows for column {summary_column}.")
 
-        # Prepare results
-        results = pd.DataFrame({
-            "id": data["id"],
-            f"{summary_column}_OverallBERT": overall_bert_scores
-        })
+        # Add results for this column to the dictionary
+        results[f"{summary_column}_OverallBERT"] = overall_bert_scores
 
-        # Save results to CSV
-        output_file_path = f"{args.output_dir}/{summary_column}_OverallBERT_Results.csv"
-        results.to_csv(output_file_path, index=False)
+    # Convert results to DataFrame
+    results_df = pd.DataFrame(results)
 
-        print(f"Results for {summary_column} saved to {output_file_path}")
+    # Save results to a single CSV file
+    results_df.to_csv(args.output_file, index=False)
+
+    print(f"Consolidated results saved to {args.output_file}")
