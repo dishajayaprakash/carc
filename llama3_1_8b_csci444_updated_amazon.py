@@ -406,7 +406,7 @@ def getScores(df, model, max_tokens=2048):
 
 """Test the code"""
 
-file_name = 'formatted_reviews_amazon.json'
+file_name = 'amazon.json'
 
 # Load the JSON file
 with open(file_name, 'r', encoding='utf-8') as f:
