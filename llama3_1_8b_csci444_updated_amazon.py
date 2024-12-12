@@ -29,6 +29,7 @@ def initialSumm(df, model, max_tokens):
     df["summary1"] = [""] * len(df) #when creting a new column, the value you assign must have the same length as the df's index OR use another way to create new column
 
     for i in range(len(df)):
+        print(f"Processing initial summary for row {i + 1}/{len(df)}")
         # Create the prompt
         prompt =  """Below is an instruction that describes a task.
 ### Instruction: You are given a set of reviews separated by ||. All reviews are in the format {rating: NUMBER} “{REVIEW_TEXT}“, including rating information of a product given by the review writer. Please write a short text containing the salient information, i.e. a summary.
@@ -95,6 +96,7 @@ def generateFeedback(df, summary_col, feedback_col, model, max_tokens):
     df[feedback_col] = [""] * len(df)
 
     for i in range(len(df)):
+        print(f"Processing feedback for row {i + 1}/{len(df)} on column {summary_col}")
         # Create the prompt
         prompt =  """You are an annotator for the fairness of summarization. You are given a set of reviews separated by I I. All reviews are in the format {rating: NUMBER} “{REVIEW_TEXT}“, including rating information of a product given by the review writer. Your task is to provide feedback on how fairness can be improved. A summary is considered unfair if it doesn’t properly represent reviews with different attributes (such as rating). Therefore, the proportion of attributes reflected in the target summary should match the proportion in the reviews.
 
@@ -155,6 +157,7 @@ def refineWFeedback(df, summary_col, feedback_col, refined_summary_col, model, m
     df[refined_summary_col] = [""] * len(df)
 
     for i in range(len(df)):
+        print(f"Refining summary for row {i + 1}/{len(df)} using feedback from column {feedback_col}")
         # Create the prompt
         prompt =  """Below is an instruction that describes a task.
 ### Instruction: You are given a set of reviews separated by ||. All reviews are in the format {rating: NUMBER} “{REVIEW_TEXT}“, including rating information of a product given by the review writer. Your task is to provide feedback on how fairness can be improved. A summary is considered unfair if it doesn’t properly represent reviews with different attributes (such as rating). Therefore, the proportion of attributes reflected in the target summary should match the proportion in the reviews. Based on the feedback, please refine the summary.
@@ -227,6 +230,7 @@ def refineWOFeedback(df, summary_col, refined_summary_col, model, max_tokens):
     df[refined_summary_col] = [""] * len(df)
 
     for i in range(len(df)):
+        print(f"Refining summary for row {i} without feedback")
         # Create the prompt
         prompt =  """Below is an instruction that describes a task.
 ### Instruction: You are given a set of reviews separated by ||. All reviews are in the format {rating: NUMBER} “{REVIEW_TEXT}“, including rating information of a product given by the review writer. Your task is to provide feedback on how fairness can be improved. A summary is considered unfair if it doesn’t properly represent reviews with different attributes (such as rating). Therefore, the proportion of attributes reflected in the target summary should match the proportion in the reviews. Please refine the summary.
@@ -294,6 +298,7 @@ def generateScores(df, rating_col, summary_col, model, max_tokens):
     df[rating_col] = [None] * len(df)
 
     for i in range(len(df)):
+        print(f"Generating score for row {i + 1}/{len(df)}")
         # Create the prompt
         prompt =  """You are an annotator for the fairness of summarization. You are given a set of reviews separated by ||. All reviews are in the format {rating: NUMBER} “{REVIEW_TEXT}“, including rating information of a product given by the review writer. Your task is to provide feedback on how fairness can be improved. A summary is considered unfair if it doesn’t properly represent reviews with different attributes (such as rating). Therefore, the proportion of attributes reflected in the target summary should match the proportion in the reviews. Your task is to rate how accurately the proportion of attributes reflected in the given summary matches the proportion in the reviews. Please assign a rating from 1 to 5, 1 for 0 – 20% accurate and 5 for above 80% accurate. Please only output a number. No explanations needed.
 
@@ -352,19 +357,19 @@ Reviews: """ + df["reviews"][i] + """\n\nsummary: """ + df[summary_col][i] + """
 
 def summary_refinement_W_feedback(df, model, max_tokens=2048):
 
-  # generate initial summary
+  print("generate initial summary")
   df = initialSumm(df, model, max_tokens)
 
-  # refinement w feedback step 1
+  print("refinement w feedback step 1")
   df = generateFeedback(df, "summary1", "feedback1", model, max_tokens)
   df = refineWFeedback(df, "summary1", "feedback1", "summary2_W_feedback", model, max_tokens)
-  # refinement w feedback step 2
+  print("refinement w feedback step 2")
   df = generateFeedback(df, "summary2_W_feedback", "feedback2", model, max_tokens)
   df = refineWFeedback(df, "summary2_W_feedback", "feedback2", "summary3_W_feedback", model, max_tokens)
-  # refinement w feedback step 3
+  print("refinement w feedback step 3")
   df = generateFeedback(df, "summary3_W_feedback", "feedback3", model, max_tokens)
   df = refineWFeedback(df, "summary3_W_feedback", "feedback3", "summary4_W_feedback", model, max_tokens)
-  # refinement w feedback step 4
+  print( "refinement w feedback step 4")
   df = generateFeedback(df, "summary3_W_feedback", "feedback4", model, max_tokens)
   df = refineWFeedback(df, "summary3_W_feedback", "feedback4", "summary5_W_feedback", model, max_tokens)
 
