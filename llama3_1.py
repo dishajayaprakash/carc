@@ -8,6 +8,7 @@ import argparse
 def initialSumm(df, model, max_tokens, base_url, headers):
     df["summary1"] = [""] * len(df)
     for i in range(len(df)):
+        print(f"Processing initial summary for row {i + 1}/{len(df)}")
         prompt = """Below is an instruction that describes a task.
 ### Instruction: You are given a set of reviews separated by ||. All reviews are in the format {rating: NUMBER} \u201c{REVIEW_TEXT}\u201c, including rating information of a product given by the review writer. Please write a short text containing the salient information, i.e. a summary.
 
@@ -26,7 +27,7 @@ Reviews: """ + df['reviews'][i] + """\n\nsummary:"""
             summary = response_data.get("choices", [{}])[0].get("text", "").strip()
             df.loc[i, "summary1"] = summary
         else:
-            print(f"Error for row {i}: {response.status_code}, {response.text}")
+            print(f"Error for row {i + 1}: {response.status_code}, {response.text}")
             df.loc[i, "summary1"] = None
 
     return df
@@ -34,6 +35,7 @@ Reviews: """ + df['reviews'][i] + """\n\nsummary:"""
 def generateFeedback(df, summary_col, feedback_col, model, max_tokens, base_url, headers):
     df[feedback_col] = [""] * len(df)
     for i in range(len(df)):
+        print(f"Generating feedback for summary {summary_col} for row {i + 1}/{len(df)}")
         prompt = """You are an annotator for the fairness of summarization...""" + df["reviews"][i] + """\n\nsummary: """ + df[summary_col][i] + """\n\nfeedback:"""
         payload = {
             "model": model,
@@ -47,7 +49,7 @@ def generateFeedback(df, summary_col, feedback_col, model, max_tokens, base_url,
             feedback = response_data.get("choices", [{}])[0].get("text", "").strip()
             df.loc[i, feedback_col] = feedback
         else:
-            print(f"Error for row {i}: {response.status_code}, {response.text}")
+            print(f"Error for row {i + 1}: {response.status_code}, {response.text}")
             df.loc[i, feedback_col] = None
 
     return df
@@ -55,6 +57,7 @@ def generateFeedback(df, summary_col, feedback_col, model, max_tokens, base_url,
 def refineWFeedback(df, summary_col, feedback_col, refined_summary_col, model, max_tokens, base_url, headers):
     df[refined_summary_col] = [""] * len(df)
     for i in range(len(df)):
+        print(f"Refining summary {summary_col} with feedback {feedback_col} for row {i + 1}/{len(df)}")
         prompt = """Below is an instruction that describes a task...""" + df["reviews"][i] + """\n\nsummary: """ + df[summary_col][i] + """\n\nfeedback: """ + df[feedback_col][i] + """\n\nRefined summary:"""
         payload = {
             "model": model,
@@ -68,7 +71,7 @@ def refineWFeedback(df, summary_col, feedback_col, refined_summary_col, model, m
             refined_summary = response_data.get("choices", [{}])[0].get("text", "").strip()
             df.loc[i, refined_summary_col] = refined_summary
         else:
-            print(f"Error for row {i}: {response.status_code}, {response.text}")
+            print(f"Error for row {i + 1}: {response.status_code}, {response.text}")
             df.loc[i, refined_summary_col] = None
 
     return df
@@ -76,6 +79,7 @@ def refineWFeedback(df, summary_col, feedback_col, refined_summary_col, model, m
 def refineWOFeedback(df, summary_col, refined_summary_col, model, max_tokens, base_url, headers):
     df[refined_summary_col] = [""] * len(df)
     for i in range(len(df)):
+        print(f"Refining summary {summary_col} without feedback for row {i + 1}/{len(df)}")
         prompt = """Below is an instruction that describes a task...""" + df["reviews"][i] + """\n\nsummary: """ + df[summary_col][i] + """\n\nRefined summary:"""
         payload = {
             "model": model,
@@ -89,19 +93,23 @@ def refineWOFeedback(df, summary_col, refined_summary_col, model, max_tokens, ba
             refined_summary = response_data.get("choices", [{}])[0].get("text", "").strip()
             df.loc[i, refined_summary_col] = refined_summary
         else:
-            print(f"Error for row {i}: {response.status_code}, {response.text}")
+            print(f"Error for row {i + 1}: {response.status_code}, {response.text}")
             df.loc[i, refined_summary_col] = None
 
     return df
 
 def summary_refinement_W_feedback(df, model, max_tokens, base_url, headers):
+    print("Starting refinement with feedback...")
     df = initialSumm(df, model, max_tokens, base_url, headers)
     df = generateFeedback(df, "summary1", "feedback1", model, max_tokens, base_url, headers)
     df = refineWFeedback(df, "summary1", "feedback1", "summary2_W_feedback", model, max_tokens, base_url, headers)
+    print("Completed refinement with feedback.")
     return df
 
 def summary_refinement_WO_feedback(df, model, max_tokens, base_url, headers):
+    print("Starting refinement without feedback...")
     df = refineWOFeedback(df, "summary1", "summary2_WO_feedback", model, max_tokens, base_url, headers)
+    print("Completed refinement without feedback.")
     return df
 
 def main(input_path, output_path):
@@ -121,10 +129,13 @@ def main(input_path, output_path):
     model = "llama3.1-8b"
     max_tokens = 2048
 
+    print("Starting the pipeline...")
     df = summary_refinement_W_feedback(df, model, max_tokens, base_url, headers)
     df = summary_refinement_WO_feedback(df, model, max_tokens, base_url, headers)
+    print("Pipeline completed.")
 
     df.to_csv(output_path, index=False)
+    print(f"Results saved to {output_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process input JSON and output CSV paths.")
