@@ -54,10 +54,13 @@ def extract_sentiments(review_text):
     Returns:
         tuple: (pos_text, neg_text, neu_text)
     """
+    review_text = review_text.replace('“', '"').replace('”', '"')
+
     # Define regex patterns for each sentiment
     pos_pattern = r'\{sentiment:\s*pos\}\s*"([^"]+)"'
     neg_pattern = r'\{sentiment:\s*neg\}\s*"([^"]+)"'
     neu_pattern = r'\{sentiment:\s*neu\}\s*"([^"]+)"'
+
 
     # Find all matches for each sentiment
     pos_matches = re.findall(pos_pattern, review_text, re.DOTALL | re.IGNORECASE)
